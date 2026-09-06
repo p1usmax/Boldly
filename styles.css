@@ -1,0 +1,7 @@
+.bionic-reading-span {
+
+  all: unset;
+  display: inline;
+  font: inherit;
+  color: inherit;
+}
