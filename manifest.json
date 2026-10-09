@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Boldly",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Bolds the beginning of each word to help guide your eyes while reading.",
 
-  "permissions": ["storage"],
+  "permissions": ["storage", "activeTab"],
 
   "content_scripts": [
     {
@@ -18,16 +18,15 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "Boldly",
-    "default_icon": {
-      "16": "icon16.png",
-      "48": "icon48.png",
-      "128": "icon128.png"
-    }
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
   },
 
-  "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "boldly@boldly-extension.dev",
+      "data_collection_permissions": { "required": ["none"] }
+    }
   }
 }

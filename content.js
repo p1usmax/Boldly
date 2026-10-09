@@ -1,91 +1,200 @@
-// ===== Bionic Reading — content.js =====
-// This file does one job: find readable text on the page and bold
-// the first part of each word. Nothing else touches the DOM.
+// ===== Boldly — content.js =====
+// Finds readable text on the page and bolds the start of each word.
+// Works in Chrome, Brave, Edge and Firefox (uses the `chrome.*` namespace).
 
-// --- Config (will later come from popup + storage) ---
-const CONFIG = {
-  boldPercent: 0.5,      // 50% of each word gets bolded
-  minWordLength: 3,      // skip short words like "a", "is"
-  minBoldChars: 1,       // always bold at least this many letters
-  skipTags: new Set([
-    'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT',
-    'CODE', 'PRE', 'SVG', 'CANVAS'
-  ])
-};
+(() => {
+  'use strict';
 
-// --- Step 1: turn one word into bionic HTML ---
-function bionicWord(word) {
-  if (word.length < CONFIG.minWordLength) return word;
+  // Don't run twice in the same frame (e.g. extension reloaded).
+  if (window.__boldlyLoaded) return;
+  window.__boldlyLoaded = true;
 
-  let boldLength = Math.ceil(word.length * CONFIG.boldPercent);
-  boldLength = Math.max(boldLength, CONFIG.minBoldChars);
-  boldLength = Math.min(boldLength, word.length); // never exceed word length
+  const WRAP = 'boldly-w'; // wraps a processed text node
+  const BOLD = 'boldly-b'; // the bold part
+  // Custom (hyphenated) tag names: site CSS like `span {display:block}`
+  // or `b {font-weight:normal}` can't accidentally target them.
 
-  const boldPart = word.slice(0, boldLength);
-  const restPart = word.slice(boldLength);
+  const DEFAULTS = {
+    enabled: true,
+    boldPercent: 0.5,
+    blockedSites: []
+  };
+  const MIN_WORD_LENGTH = 3;
+  const MIN_BOLD_CHARS = 1;
 
-  return `<b>${boldPart}</b>${restPart}`;
-}
+  // Words = runs of Latin / Cyrillic / Greek letters (+ inner apostrophes).
+  // Digits, punctuation and other scripts are left alone. Arabic, Hebrew,
+  // Indic and CJK are skipped on purpose: splitting a cursive word into two
+  // styled pieces breaks letter joining.
+  const L = '[\\p{Script=Latin}\\p{Script=Cyrillic}\\p{Script=Greek}\\p{M}]';
+  const WORD_RE = new RegExp(`${L}+(?:['\u2019]${L}+)*`, 'gu');
+  const MARK_RE = /^\p{M}$/u;
 
-// --- Step 2: turn a whole sentence/text chunk into bionic HTML ---
-// Splits on whitespace boundaries but keeps the whitespace so
-// formatting/spacing is untouched.
-function bionicText(text) {
-  return text.replace(/\S+/g, (word) => bionicWord(word));
-}
+  // Anything inside these is never touched (checked with closest()).
+  const SKIP_SELECTOR = [
+    'script', 'style', 'noscript', 'template', 'textarea', 'input', 'select',
+    'option', 'pre', 'code', 'kbd', 'samp', 'var', 'svg', 'canvas', 'math',
+    'iframe', 'object', 'head', 'title', WRAP,
+    '[contenteditable]:not([contenteditable="false"])'
+  ].join(',');
 
-// --- Step 3: decide whether a node should be skipped ---
-function shouldSkip(node) {
-  const parent = node.parentElement;
-  if (!parent) return true;
-  if (CONFIG.skipTags.has(parent.tagName)) return true;
-  if (parent.isContentEditable) return true;
-  return false;
-}
+  let settings = { ...DEFAULTS };
+  let running = false;
+  let observer = null;
+  let queue = [];
+  let qi = 0;
+  let scheduled = false;
 
-// --- Step 4: walk the DOM and transform text nodes in place ---
-function transformPage(root = document.body) {
-  const walker = document.createTreeWalker(
-    root,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode(node) {
-        if (shouldSkip(node)) return NodeFilter.FILTER_REJECT;
-        if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }
+  // ---------- helpers ----------
+  const normHost = (h) => h.replace(/^www\./, '');
+
+  function isBlocked() {
+    const host = normHost(location.hostname);
+    return settings.blockedSites.some((s) => normHost(s) === host);
+  }
+
+  function shouldRun() {
+    return settings.enabled && !isBlocked();
+  }
+
+  function skipText(node) {
+    if (node.nodeValue.length < MIN_WORD_LENGTH) return true;
+    const parent = node.parentElement;
+    if (!parent) return true;
+    if (parent.isContentEditable) return true;
+    if (parent.closest(SKIP_SELECTOR)) return true;
+    return false;
+  }
+
+  // ---------- core transform (builds real DOM nodes, never innerHTML) ----------
+  function boldLengthFor(word) {
+    let n = Math.ceil(word.length * settings.boldPercent);
+    n = Math.max(n, MIN_BOLD_CHARS);
+    n = Math.min(n, word.length);
+    // Never split a letter from its combining mark.
+    while (n < word.length && MARK_RE.test(word[n])) n++;
+    return n;
+  }
+
+  function buildFragment(text) {
+    const wrap = document.createElement(WRAP);
+    let last = 0;
+    let changed = false;
+
+    for (const m of text.matchAll(WORD_RE)) {
+      const word = m[0];
+      if (word.length < MIN_WORD_LENGTH) continue;
+
+      if (m.index > last) wrap.appendChild(document.createTextNode(text.slice(last, m.index)));
+
+      const n = boldLengthFor(word);
+      const b = document.createElement(BOLD);
+      b.textContent = word.slice(0, n);
+      wrap.appendChild(b);
+      if (n < word.length) wrap.appendChild(document.createTextNode(word.slice(n)));
+
+      last = m.index + word.length;
+      changed = true;
     }
-  );
 
-  const textNodes = [];
-  let current;
-  while ((current = walker.nextNode())) {
-    textNodes.push(current);
+    if (!changed) return null;
+    if (last < text.length) wrap.appendChild(document.createTextNode(text.slice(last)));
+    return wrap;
   }
 
-  // Replace each text node with a span containing the bionic HTML.
-  // We do this in a second pass so we don't mutate the tree while walking it.
-  for (const node of textNodes) {
-    const span = document.createElement('span');
-    span.className = 'bionic-reading-span';
-    span.innerHTML = bionicText(node.nodeValue);
-    node.parentNode.replaceChild(span, node);
+  function processTextNode(node) {
+    if (!node.isConnected || skipText(node)) return;
+    const wrap = buildFragment(node.nodeValue);
+    if (wrap) node.replaceWith(wrap);
   }
-}
 
-// Keep this around for manual console testing too.
-window.__bionicTransformPage = transformPage;
+  // ---------- queue (time-sliced so big pages don't freeze) ----------
+  function collect(root) {
+    if (root.nodeType === Node.TEXT_NODE) {
+      queue.push(root);
+      return;
+    }
+    if (root.nodeType !== Node.ELEMENT_NODE) return;
+    if (root.localName === WRAP || root.localName === BOLD) return;
 
-// --- Step 5: auto-run on page load, based on saved settings ---
-// Defaults used if nothing is saved yet.
-const DEFAULT_SETTINGS = {
-  enabled: true,
-  boldPercent: 0.5
-};
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) queue.push(n);
+  }
 
-chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
-  if (!settings.enabled) return; // user turned it off — do nothing
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    const run = () => { scheduled = false; pump(); };
+    if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 200 });
+    else setTimeout(run, 16);
+  }
 
-  CONFIG.boldPercent = settings.boldPercent;
-  transformPage();
-});
+  function pump() {
+    if (!running) return;
+    const t0 = performance.now();
+    while (qi < queue.length && performance.now() - t0 < 12) {
+      processTextNode(queue[qi++]);
+    }
+    if (qi < queue.length) {
+      schedule();
+    } else {
+      queue = [];
+      qi = 0;
+    }
+  }
+
+  function enqueue(root) {
+    collect(root);
+    schedule();
+  }
+
+  // ---------- start / stop ----------
+  function start() {
+    if (running || !document.body) return;
+    running = true;
+
+    observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) enqueue(node);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    enqueue(document.body);
+  }
+
+  function stop() {
+    running = false;
+    if (observer) { observer.disconnect(); observer = null; }
+    queue = [];
+    qi = 0;
+
+    // Undo everything we changed.
+    if (document.body) {
+      document.body.querySelectorAll(WRAP).forEach((w) => {
+        w.replaceWith(document.createTextNode(w.textContent));
+      });
+      document.body.normalize();
+    }
+  }
+
+  function apply() {
+    stop();
+    if (shouldRun()) start();
+  }
+
+  // ---------- settings ----------
+  function load(cb) {
+    chrome.storage.local.get(DEFAULTS, (s) => {
+      settings = { ...DEFAULTS, ...s };
+      cb && cb();
+    });
+  }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') load(apply);
+  });
+
+  load(apply);
+})();

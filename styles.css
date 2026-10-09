@@ -1,7 +1,2 @@
-.bionic-reading-span {
-
-  all: unset;
-  display: inline;
-  font: inherit;
-  color: inherit;
-}
+boldly-w { display: inline; }
+boldly-b { display: inline; font-weight: 700 !important; }

@@ -3,33 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      width: 220px;
-      padding: 12px;
-    }
-    h1 {
-      font-size: 14px;
-      margin: 0 0 12px 0;
-    }
-    .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-    }
-    label {
-      font-size: 13px;
-    }
-    #intensityValue {
-      font-size: 12px;
-      color: #555;
-    }
-    #reloadNote {
-      font-size: 11px;
-      color: #888;
-      margin-top: 8px;
-    }
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; width: 240px; padding: 12px; margin: 0; }
+    h1 { font-size: 14px; margin: 0 0 12px; }
+    .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    label { font-size: 13px; }
+    #intensityValue { font-size: 12px; opacity: .7; }
+    input[type=range] { width: 100%; }
+    button { width: 100%; padding: 6px; font-size: 12px; cursor: pointer; }
+    button:disabled { cursor: default; }
   </style>
 </head>
 <body>
@@ -40,14 +22,12 @@
     <input type="checkbox" id="enabledToggle" />
   </div>
 
-  <div class="row" style="flex-direction: column; align-items: stretch;">
-    <label for="intensitySlider">
-      Bold intensity: <span id="intensityValue">50%</span>
-    </label>
+  <div style="margin-bottom: 12px;">
+    <label for="intensitySlider">Bold amount: <span id="intensityValue">50%</span></label>
     <input type="range" id="intensitySlider" min="20" max="70" step="5" />
   </div>
 
-  <div id="reloadNote">Reload the page for changes to apply.</div>
+  <button id="siteBtn" disabled>Loading…</button>
 
   <script src="popup.js"></script>
 </body>
